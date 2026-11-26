@@ -1,10 +1,14 @@
+import sys
+
 import pytest
 
 from voxo.__main__ import main
 
 
 class TestMain:
-    def test_says_not_written(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """The command says the service is not written yet."""
-        main()
-        assert "not written yet" in capsys.readouterr().out
+    def test_version(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+        """`--version` prints the name of the command and a version."""
+        monkeypatch.setattr(sys, "argv", ["voxo", "--version"])
+        with pytest.raises(SystemExit):
+            main()
+        assert capsys.readouterr().out.startswith("voxo ")
