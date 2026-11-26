@@ -19,12 +19,17 @@ PAUSE = RATE // 2  # samples of silence that end a phrase
 type Sound = NDArray[np.float32]  # mono samples from -1 to 1
 
 
+def is_downloaded(data_dir: Path) -> bool:
+    """Whether the model of the VAD is in the data dir: without it no dictation starts."""
+    return (data_dir / FILE).exists()
+
+
 def download(data_dir: Path, on_progress: Callable[[int], None]) -> None:
     """Fetch the model of the VAD into the data dir; does nothing when it is there.
 
     Calls *on_progress* and raises `VoxoError` as `fetch` does. A failed download leaves nothing behind.
     """
-    if (data_dir / FILE).exists():
+    if is_downloaded(data_dir):
         return
     # Beside the file: the rename at the end stays on one disk, so the file appears whole or not at all.
     with tempfile.TemporaryDirectory(dir=data_dir, prefix=".download-") as tmp:
@@ -41,7 +46,7 @@ class Phrases:
 
     def __init__(self, data_dir: Path) -> None:
         """Raises `ConflictError` when the model of the VAD is not in *data_dir*: `download` fetches it."""
-        if not (data_dir / FILE).exists():
+        if not is_downloaded(data_dir):
             raise ConflictError("voxo cannot find pauses yet: run `voxo download` with any model, it fetches what is needed")
         self._vad = sherpa_onnx.VadModel.create(
             sherpa_onnx.VadModelConfig(

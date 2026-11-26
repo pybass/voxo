@@ -22,7 +22,8 @@ class ModelStatus:
     """A model voxo knows, and whether it can be used."""
 
     id: str  # the name an app gives in a request
-    downloaded: bool  # whether its files are in the data dir; only then the model can be used
+    downloaded: bool  # whether all it needs is in the data dir; only then the model can be used
+    downloading: int | None  # bytes fetched so far of the file a download in this process fetches now; None when none runs
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,8 @@ class Core:
         self._recognizers_lock = threading.Lock()  # held while a model loads, so no model is loaded twice
         self._dictations: dict[str, _Dictation] = {}
         self._dictations_lock = threading.Lock()
+        self._downloading: dict[str, int] = {}  # by model id: the bytes fetched so far of the file being fetched
+        self._download_lock = threading.Lock()  # held by a download: the next one waits, then skips what is there
 
     def start(self) -> None:
         """Lock the data dir. Raises `VoxoError` when another server runs on it.
@@ -93,19 +96,33 @@ class Core:
 
     def models(self) -> list[ModelStatus]:
         """Every model voxo knows."""
-        return [ModelStatus(model.id, model.is_downloaded(self._data_dir)) for model in MODELS.values()]
+        vad = pauses.is_downloaded(self._data_dir)
+        return [
+            ModelStatus(model.id, vad and model.is_downloaded(self._data_dir), self._downloading.get(model.id))
+            for model in MODELS.values()
+        ]
 
     def download(self, model_id: str, on_progress: Callable[[int], None]) -> None:
         """Fetch into the data dir the files of a model, and what finds the pauses; skips what is there. Needs the network.
 
-        Calls *on_progress* with the bytes fetched so far of the file being fetched, about once per megabyte. Works
-        while a server runs on the data dir: it sees the model as soon as this returns. Raises `VoxoError` for an
-        unknown model, a failed download, or a file that is not the one voxo was tried with.
+        Calls *on_progress* with the bytes fetched so far of the file being fetched, about once per megabyte; `models`
+        gives the same number meanwhile. Works while a server runs on the data dir: it sees the model as soon as this
+        returns. One download runs at a time in a process: the next one waits. Raises `VoxoError` for an unknown
+        model, a failed download, or a file that is not the one voxo was tried with.
         """
         model = Model.named(model_id)
-        pauses.download(self._data_dir, on_progress)
-        if not model.is_downloaded(self._data_dir):
-            model.download(self._data_dir, on_progress)
+
+        def progress(fetched: int) -> None:
+            self._downloading[model_id] = fetched
+            on_progress(fetched)
+
+        with self._download_lock:
+            try:
+                pauses.download(self._data_dir, progress)
+                if not model.is_downloaded(self._data_dir):
+                    model.download(self._data_dir, progress)
+            finally:
+                self._downloading.pop(model_id, None)
 
     def dictate(self, dictation_id: str, model_id: str, piece: int, sound: bytes, *, last: bool) -> DictationText:
         """Add a piece of sound to a dictation and recognize what it changed.

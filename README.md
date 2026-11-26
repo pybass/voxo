@@ -2,7 +2,8 @@
 
 A speech-to-text service for your own server: an app sends it sound and gets the text back.
 
-**Early development.** Dictation works on the local port; the rest of the goals is not built yet.
+**Early development.** Dictation works on the local port, with a page to try it; the rest of the goals is not
+built yet.
 
 ## Goals
 
@@ -56,6 +57,7 @@ voxo download parakeet-v3   # 25 European languages, Russian and English among t
 
 `voxo download` fetches the files of a model into the data dir. It is the only command that needs the
 network, and it works while the service runs. `GET /models` lists the models and says which are downloaded.
+The [test page](#test-page) downloads a model too, with a button.
 
 ### Dictation
 
@@ -74,6 +76,32 @@ and numbers the pieces from 0. It sends the next piece only after the answer to 
 - `last=true` on a piece ends the dictation, and what was being said comes in `ended`.
 
 `http://127.0.0.1:7711/docs` has the rest: a piece sent again, a forgotten dictation, and the errors.
+
+### Test page
+
+`http://127.0.0.1:7711/` is a page to try a dictation by voice: pick a model, press Start and speak. For a
+model that is not downloaded, the button downloads it first. The page shows the text as it comes, and how long
+the answers took. Each dictation stays on the page, so the same words can be said to another model. For a voxo
+on a server, pass its port to your machine first: `ssh -L 7711:127.0.0.1:7711 <server>`.
+
+### Page script
+
+`http://127.0.0.1:7711/voxo.js` is the page script. An app takes a copy of it, and gives its pages a route that
+passes each request to voxo as it is.
+
+```js
+import { dictate } from "./voxo.js";
+
+const stop = await dictate({
+  url: "/dictations", // the route of the app
+  params: { model: "gigaam-v3" },
+  onAnswer: ({ ended, current }) => {}, // put the text on the page
+  onError: (error) => {},
+});
+await stop(); // frees the microphone and waits for the last answer
+```
+
+The comment on `dictate` in the file describes the options.
 
 ## Development
 

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>voxo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font: 17px/1.5 system-ui, sans-serif;
+      }
+      body {
+        max-width: 44rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      h1 {
+        font-size: 1.2rem;
+      }
+      select,
+      button {
+        font: inherit;
+        padding: 0.4rem 0.9rem;
+      }
+      #error {
+        color: #c0392b;
+      }
+      article {
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+      }
+      article header,
+      article .current {
+        color: color-mix(in srgb, currentColor 55%, transparent);
+      }
+      article header {
+        font-size: 0.85rem;
+      }
+      article p {
+        margin: 0.4rem 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>voxo: try a dictation</h1>
+    <select id="model" aria-label="Model"></select>
+    <button id="toggle" disabled>Start</button>
+    <p id="error"></p>
+    <main id="dictations"></main>
+
+    <script type="module">
+      import { dictate } from "./voxo.js";
+
+      const model = document.querySelector("#model");
+      const toggle = document.querySelector("#toggle");
+      const error = document.querySelector("#error");
+      let stop = null; // ends the dictation that runs now
+      let downloaded = {}; // by the id of a model: whether voxo can use it
+
+      /** Free the page for the next press, and name the button after what it does to the chosen model. */
+      function idle() {
+        stop = null;
+        toggle.textContent = downloaded[model.value] ? "Start" : "Download";
+        toggle.disabled = model.disabled = false;
+      }
+
+      /** Fill the list with the models of voxo, keeping the chosen one, or choosing the first that can be used. */
+      async function load() {
+        const chosen = model.value;
+        const models = await (await fetch("/models")).json();
+        downloaded = Object.fromEntries(models.map((entry) => [entry.id, entry.downloaded]));
+        model.replaceChildren(...models.map(({ id }) => new Option(downloaded[id] ? id : `${id} (not downloaded)`, id)));
+        model.value = chosen || (models.find((entry) => entry.downloaded) ?? models[0]).id;
+        idle();
+      }
+
+      /** Have voxo download the chosen model, with the megabytes fetched so far on the button. */
+      async function download() {
+        const id = model.value;
+        toggle.textContent = "Downloading";
+        let running = true;
+        const watch = setInterval(async () => {
+          const { downloading } = (await (await fetch("/models")).json()).find((entry) => entry.id === id);
+          // Checked after the wait: the download may have ended while this answer was on its way.
+          if (running && downloading !== null) toggle.textContent = `Downloading: ${downloading >> 20} MB`;
+        }, 1000);
+        const response = await fetch(`/models/${id}/download`, { method: "POST" });
+        running = false;
+        clearInterval(watch);
+        if (!response.ok) error.textContent = `${response.status} ${await response.text()}`;
+        await load();
+      }
+
+      model.onchange = idle;
+      await load();
+
+      toggle.onclick = async () => {
+        if (stop) {
+          // The answer to the last piece is still to come: no new dictation until then.
+          toggle.disabled = true;
+          await stop();
+          idle();
+          return;
+        }
+        error.textContent = "";
+        toggle.disabled = model.disabled = true;
+        if (!downloaded[model.value]) {
+          await download();
+          return;
+        }
+        // The newest dictation is on top, the ones before stay below it: say the same with another model to compare.
+        const article = document.createElement("article");
+        article.innerHTML = '<header></header><p><span class="ended"></span> <span class="current"></span></p>';
+        const [times, ended, current] = article.querySelectorAll("header, span");
+        const took = []; // seconds of each answer
+        try {
+          stop = await dictate({
+            url: "/dictations",
+            params: { model: model.value },
+            onAnswer(answer, seconds) {
+              ended.textContent = [ended.textContent, ...answer.ended].filter(Boolean).join(" ");
+              current.textContent = answer.current;
+              took.push(seconds);
+              const average = took.reduce((sum, value) => sum + value) / took.length;
+              times.textContent =
+                `${model.value}: ${took.length} answers, the last in ${seconds.toFixed(2)} s, ` +
+                `${average.toFixed(2)} s on average, the slowest in ${Math.max(...took).toFixed(2)} s`;
+            },
+            onError(failure) {
+              error.textContent = failure.message;
+              idle();
+            },
+          });
+        } catch (failure) {
+          error.textContent = `Cannot start: ${failure.message}`;
+          idle();
+          return;
+        }
+        times.textContent = `${model.value}: listening`;
+        document.querySelector("#dictations").prepend(article);
+        toggle.textContent = "Stop";
+        toggle.disabled = false;
+      };
+    </script>
+  </body>
+</html>

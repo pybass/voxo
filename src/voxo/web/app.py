@@ -1,9 +1,10 @@
 from importlib.metadata import version
+from pathlib import Path as FilePath
 from typing import Annotated
 
 from fastapi import Body, FastAPI, Path, Query, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from voxo.core.core import Core, DictationText, ModelStatus
 from voxo.core.errors import ConflictError, InvalidError, NotFoundError, VoxoError
@@ -21,13 +22,34 @@ def create_app(core: Core) -> FastAPI:
         codes: dict[type[VoxoError], int] = {NotFoundError: 404, ConflictError: 409, InvalidError: 422}
         return JSONResponse({"detail": str(error)}, codes.get(type(error), 500))
 
+    @app.get("/", include_in_schema=False)
+    def test_page() -> FileResponse:
+        """The test page: a dictation by voice with no app."""
+        return FileResponse(FilePath(__file__).with_name("test_page.html"))
+
+    @app.get("/voxo.js", include_in_schema=False)
+    def page_script() -> FileResponse:
+        """The page script: the browser half of a dictation, which an app takes a copy of."""
+        return FileResponse(FilePath(__file__).with_name("voxo.js"))
+
     @app.get("/models")
     def models() -> list[ModelStatus]:
         """The models voxo knows. `id` is the name to give in a request.
 
-        Only a model with `downloaded` true can be used; `voxo download` on the server fetches one.
+        Only a model with `downloaded` true can be used. While voxo downloads a model, `downloading` is the bytes
+        fetched so far of the file it fetches now; else it is null.
         """
         return core.models()
+
+    # Never on a port that the internet can reach: any caller could make the server fetch hundreds of megabytes.
+    @app.post("/models/{model_id}/download", status_code=204)
+    def download(model_id: str) -> None:
+        """Fetch a model from the internet into the data dir, as `voxo download` does.
+
+        Answers when the model is there, which may take minutes: give the request no short timeout. It skips what
+        is there already. One download runs at a time: the next one waits.
+        """
+        core.download(model_id, lambda _fetched: None)
 
     @app.post("/dictations/{dictation_id}")
     def dictate(
