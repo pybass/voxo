@@ -11,7 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-from voxo.core import Core
+from voxo.core.core import Core
 
 
 def start(port: int, data_dir: Path) -> None:

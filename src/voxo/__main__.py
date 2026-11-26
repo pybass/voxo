@@ -9,7 +9,8 @@ from pathlib import Path
 
 import uvicorn
 
-from voxo.core import Core, VoxoError
+from voxo.core.core import Core
+from voxo.core.errors import VoxoError
 from voxo.daemon import start, stop
 from voxo.web.app import create_app
 
@@ -32,6 +33,7 @@ def main() -> None:
     command(serve, port, data_dir)
     command(start, port, data_dir)
     command(stop, data_dir)
+    command(download, data_dir).add_argument("model", help="the name of the model; a wrong one lists the names voxo knows")
     args = parser.parse_args()
     if args.command == "serve":
         serve(args.port, args.data_dir)
@@ -39,15 +41,35 @@ def main() -> None:
         start(args.port, args.data_dir)
     elif args.command == "stop":
         stop(args.data_dir)
+    elif args.command == "download":
+        download(args.model, args.data_dir)
 
 
 def serve(port: int, data_dir: Path) -> None:
     """Run the service in this terminal, until Ctrl+C."""
+    core = Core(data_dir)
     try:
-        Core(data_dir).start()
+        core.start()
     except VoxoError as e:
         sys.exit(str(e))
-    uvicorn.run(create_app(), host="127.0.0.1", port=port)
+    uvicorn.run(create_app(core), host="127.0.0.1", port=port)
+
+
+def download(model: str, data_dir: Path) -> None:
+    """Fetch the files of a model into the data dir. The only command that needs the network.
+
+    Works while the service runs: it sees the model as soon as the download ends.
+    """
+
+    def show(fetched: int) -> None:
+        # The cursor goes back to the start of the line, so the message that follows writes over the progress.
+        sys.stderr.write(f"{fetched >> 20} MB\r")
+
+    try:
+        Core(data_dir).download(model, show)
+    except VoxoError as e:
+        sys.exit(str(e))
+    sys.stdout.write(f"{model} is downloaded\n")
 
 
 if __name__ == "__main__":

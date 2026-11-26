@@ -16,3 +16,4 @@ Read these files fully and follow them.
 ## Project Reading (context)
 Read these before the first task; do not answer until you have.
 - `README.md`
+- `docs/architecture.md`
