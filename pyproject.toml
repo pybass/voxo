@@ -1,0 +1,104 @@
+[project]
+name = "voxo"
+version = "0.0.1"
+description = "A speech-to-text service for your own server."
+readme = "README.md"
+authors = [{ name = "pybass" }]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.15"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.15",
+]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/pybass/voxo"
+Issues = "https://github.com/pybass/voxo/issues"
+
+[project.scripts]
+voxo = "voxo.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]  # pinned: build backends live outside uv.lock
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff~=0.17.0",
+    "mypy~=2.4.0",
+    "pytest~=9.1.1",
+    "pytest-xdist~=3.8.0",
+    "pip-audit~=2.10.1",
+    "pre-commit~=4.7.0",
+]
+
+[tool.uv]
+required-version = ">=0.13"
+publish-url = "https://upload.pypi.org/legacy/"
+check-url = "https://pypi.org/simple/"  # lets a failed release re-run: uploaded files are skipped
+
+[tool.ruff]
+line-length = 130
+target-version = "py315"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # Tool conflicts
+    "COM812",   # trailing-comma — handled by ruff formatter
+    "ISC001",   # implicit-string-concat — conflicts with ruff formatter
+    "D203",     # conflicts with D211
+    "D213",     # conflicts with D212
+    # Style preferences
+    "PLC0414",  # `import x as x` is our re-export marker
+    "RET503",   # explicit None returns are noisy
+    "G004",     # f-strings in logging are fine
+    "PT001", "PT006", "PT007", "PT023",  # cosmetic pytest-style rules
+    "D401",     # non-imperative-mood — fights noun-phrase docstrings (OpenAPI summaries) and fires inconsistently
+    # Categories that fight our style
+    "FIX",      # TODOs are fine
+    "FBT",      # boolean-trap — too restrictive
+    "EM",       # inline error messages are fine
+    "CPY",      # no copyright headers — per-file headers add nothing
+    "TC",       # TYPE_CHECKING blocks: import noise, break pydantic runtime annotations
+    "TRY003",   # raise-vanilla-args — too noisy
+    "C901",     # complexity — judgment call
+    "PLR0911", "PLR0912", "PLR0913", "PLR0917", "PLR2004",  # soft pylint thresholds
+    "TD002", "TD003",  # TODO author/link — optional
+    "ASYNC109", # async-function-with-timeout — debatable
+    "D1",       # no docstring-coverage mandate — a docstring is written only where it adds contract
+]
+
+[tool.ruff.lint.pep8-naming]
+classmethod-decorators = ["pydantic.field_validator"]  # N805: cls is correct without @classmethod
+
+[tool.ruff.lint.pydocstyle]
+ignore-decorators = ["typing.override", "typing.overload"]  # the base class / overload stub carries the contract
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S", "SLF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.15"
+strict = true
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "possibly-undefined", "truthy-bool", "exhaustive-match", "unused-awaitable"]
+
+[tool.codespell]
+skip = "uv.lock,.git,.venv,.mypy_cache,.ruff_cache,.pytest_cache"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+xfail_strict = true
+filterwarnings = ["error"]  # targeted ignores go after "error"
