@@ -21,6 +21,7 @@ when voxo gets one.
 - Building a `Core` starts no work. Only the server calls `start`, which locks the data dir until the
   process exits; a second server on the same data is refused. Any other client builds a `Core` and
   uses it as it is.
+- The web app calls `Core` from several threads at once. `Core` guards what it keeps in memory with locks.
 - Core never prints. What a client shows while a method works, such as the progress of a download,
   the method gives through a function the client passes in.
 - Core raises its own errors, with a message written for the user. Each client translates them.
