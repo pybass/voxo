@@ -2,13 +2,14 @@ from importlib.metadata import version
 from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import Body, FastAPI, Form, Path, Query, Request, UploadFile
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi import Body, Depends, FastAPI, Form, Path, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
+from starlette.middleware.base import RequestResponseEndpoint
 
 from voxo.core.core import Core, DictationText, ModelStatus
-from voxo.core.errors import ConflictError, InvalidError, NotFoundError, VoxoError
+from voxo.core.errors import ConflictError, InvalidError, NotFoundError, UnauthorizedError, VoxoError
 
 
 class Transcription(BaseModel):
@@ -18,16 +19,34 @@ class Transcription(BaseModel):
 
 
 def create_app(core: Core) -> FastAPI:
-    """The app of the local port over *core*: it asks for no token, so only this machine may reach it."""
-    app = FastAPI(title="voxo", version=version("voxo"))
-    # Without it a page of any site could use the service: it points its own host name at 127.0.0.1 (DNS rebinding).
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+    """The app of the service over *core*. All that does work asks for the token; the two pages and `/docs` do not."""
+    app = FastAPI(
+        title="voxo",
+        version=version("voxo"),
+        description="Every request here carries the token of the service as `Authorization: Bearer <token>`. "
+        "`voxo token` on the machine of the service prints it.",
+        # Only for `/docs`, where it adds the field for the token: `authorize` below does the check.
+        dependencies=[Depends(HTTPBearer(auto_error=False))],
+    )
 
     @app.exception_handler(VoxoError)
     def refuse(_request: Request, error: VoxoError) -> JSONResponse:
         # The one place where an error of core becomes an HTTP code. The body has the shape FastAPI gives its own errors.
-        codes: dict[type[VoxoError], int] = {NotFoundError: 404, ConflictError: 409, InvalidError: 422}
-        return JSONResponse({"detail": str(error)}, codes.get(type(error), 500))
+        codes: dict[type[VoxoError], int] = {UnauthorizedError: 401, NotFoundError: 404, ConflictError: 409, InvalidError: 422}
+        code = codes.get(type(error), 500)
+        return JSONResponse({"detail": str(error)}, code, {"WWW-Authenticate": "Bearer"} if code == 401 else None)
+
+    @app.middleware("http")
+    async def authorize(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Refuse a request that does work without the token of the service."""
+        # Here and not in a route: a route first takes in the body, of any size, and a stranger may send one.
+        if request.url.path not in {"/", "/voxo.js", "/docs", "/openapi.json"}:
+            scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+            try:
+                core.authorize(token if scheme.lower() == "bearer" else "")
+            except UnauthorizedError as error:
+                return refuse(request, error)
+        return await call_next(request)
 
     @app.get("/", include_in_schema=False)
     def test_page() -> FileResponse:
@@ -48,7 +67,6 @@ def create_app(core: Core) -> FastAPI:
         """
         return core.models()
 
-    # Never on a port that the internet can reach: any caller could make the server fetch hundreds of megabytes.
     @app.post("/models/{model_id}/download", status_code=204)
     def download(model_id: str) -> None:
         """Fetch a model from the internet into the data dir, as `voxo download` does.

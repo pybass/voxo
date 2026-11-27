@@ -2,8 +2,7 @@
 
 A speech-to-text service for your own server: an app sends it sound and gets the text back.
 
-**Early development.** Dictation and a whole recording work on the local port, with a page to try a dictation;
-the rest of the goals is not built yet.
+**Early development.** Dictation and a whole recording work, with a page to try a dictation.
 
 ## Goals
 
@@ -22,9 +21,9 @@ What voxo is meant to become. Only what [Usage](#usage) shows works today.
 - **No network at work.** The internet is needed only to download a model.
 - **Nothing to look after.** The state of a dictation lives in memory. There is no database.
 - **Plain requests.** HTTP requests, no WebSocket: the time goes to the model, not to the transport.
-- **Two ports.** The local port is for apps on the same machine and asks for no token. An outer port,
-  off until the admin turns it on, always asks for one. Each app has its own token, and voxo keeps
-  only a hash of it.
+- **One token.** Every request that does work carries the token of the service, one for all apps, so
+  no stranger uses it. The port listens only on the machine itself; a reverse proxy gives HTTPS to apps
+  on other machines.
 - **A page script.** One JavaScript file with no dependencies is the browser half of a dictation. It
   draws nothing, and an app takes a copy of it. The browser talks only to its own app, which passes
   the sound to voxo, so a token never reaches a browser.
@@ -39,6 +38,7 @@ models that stream by themselves.
 ```sh
 uv tool install .   # in a checkout of this repository
 voxo start          # http://127.0.0.1:7711, data in ~/.local/share/voxo
+voxo token          # the token every request must carry
 voxo stop
 ```
 
@@ -46,7 +46,15 @@ voxo stop
 does not start again after a reboot or a crash. `voxo serve` runs the service in the terminal. One data dir
 takes one service at a time. `--port` and `--data-dir` after a command change the defaults.
 
-The port listens only on `127.0.0.1` and asks for no token: it is for apps on the same machine.
+### Token
+
+Every request that does work carries the token of the service, one for all apps, as
+`Authorization: Bearer <token>`. `voxo token` prints it, and the first call makes it: until then voxo refuses
+every request. `voxo token --new` replaces the token, and the old one stops working at once. The token lies in
+the file `token` of the data dir.
+
+The port listens only on `127.0.0.1`. For an app on another machine, put a reverse proxy such as Caddy in front
+of it: without HTTPS the token would cross the network in the open.
 
 ### Models
 
@@ -63,6 +71,7 @@ The [test page](#test-page) downloads a model too, with a button.
 
 ```sh
 curl -X POST "http://127.0.0.1:7711/dictations/7f3a?model=gigaam-v3&piece=0" \
+  -H "Authorization: Bearer $(voxo token)" \
   -H "Content-Type: application/octet-stream" --data-binary @piece0.pcm
 # {"ended":[],"current":"Привет, проверь"}
 ```
@@ -80,13 +89,15 @@ and numbers the pieces from 0. It sends the next piece only after the answer to 
 ### A whole recording
 
 ```sh
-curl http://127.0.0.1:7711/v1/audio/transcriptions -F file=@meeting.m4a -F model=gigaam-v3
+curl http://127.0.0.1:7711/v1/audio/transcriptions -H "Authorization: Bearer $(voxo token)" \
+  -F file=@meeting.m4a -F model=gigaam-v3
 # {"text":"Привет. Проверь, пожалуйста, последний коммит."}
 ```
 
 An app sends a recording and gets all its text in one answer. The request and the answer are those of the
-OpenAI API: a program written for it works with voxo when it is given `http://127.0.0.1:7711/v1` as the address
-and a voxo model. Of the fields of that request, voxo reads only `file` and `model`, and the answer is always JSON.
+OpenAI API: a program written for it works with voxo when it is given `http://127.0.0.1:7711/v1` as the address,
+the token as the key, and a voxo model. Of the fields of that request, voxo reads only `file` and `model`, and
+the answer is always JSON.
 
 - The recording may be in any format `ffmpeg` reads. `ffmpeg` must be installed on the machine
   (`apt install ffmpeg`); nothing else in voxo needs it.
@@ -95,15 +106,19 @@ and a voxo model. Of the fields of that request, voxo reads only `file` and `mod
 
 ### Test page
 
-`http://127.0.0.1:7711/` is a page to try a dictation by voice: pick a model, press Start and speak. For a
-model that is not downloaded, the button downloads it first. The page shows the text as it comes, and how long
-the answers took. Each dictation stays on the page, so the same words can be said to another model. For a voxo
-on a server, pass its port to your machine first: `ssh -L 7711:127.0.0.1:7711 <server>`.
+`http://127.0.0.1:7711/` is a page to try a dictation by voice: type the token, pick a model, press Start and
+speak. The browser keeps the token. For a model that is not downloaded, the button downloads it first. The page
+shows the text as it comes, and how long the answers took. Each dictation stays on the page, so the same words
+can be said to another model.
+
+For a voxo on a server, open the page at the address of its reverse proxy, or pass the port to your machine
+first: `ssh -L 7711:127.0.0.1:7711 <server>`. A browser gives the microphone only to a page of `127.0.0.1` or
+of an HTTPS address.
 
 ### Page script
 
 `http://127.0.0.1:7711/voxo.js` is the page script. An app takes a copy of it, and gives its pages a route that
-passes each request to voxo as it is.
+passes each request to voxo with the token added.
 
 ```js
 import { dictate } from "./voxo.js";

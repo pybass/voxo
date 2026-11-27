@@ -17,6 +17,7 @@
       h1 {
         font-size: 1.2rem;
       }
+      input,
       select,
       button {
         font: inherit;
@@ -44,6 +45,7 @@
   </head>
   <body>
     <h1>voxo: try a dictation</h1>
+    <input id="token" type="password" placeholder="Token" aria-label="Token" autocomplete="off" />
     <select id="model" aria-label="Model"></select>
     <button id="toggle" disabled>Start</button>
     <p id="error"></p>
@@ -52,11 +54,15 @@
     <script type="module">
       import { dictate } from "./voxo.js";
 
+      const token = document.querySelector("#token");
       const model = document.querySelector("#model");
       const toggle = document.querySelector("#toggle");
       const error = document.querySelector("#error");
       let stop = null; // ends the dictation that runs now
       let downloaded = {}; // by the id of a model: whether voxo can use it
+
+      /** The headers of every request to voxo: they carry the token typed on the page. */
+      const headers = () => ({ Authorization: `Bearer ${token.value.trim()}` });
 
       /** Free the page for the next press, and name the button after what it does to the chosen model. */
       function idle() {
@@ -65,10 +71,22 @@
         toggle.disabled = model.disabled = false;
       }
 
-      /** Fill the list with the models of voxo, keeping the chosen one, or choosing the first that can be used. */
+      /**
+       * Fill the list with the models of voxo, keeping the chosen one, or choosing the first that can be used.
+       * When voxo refuses the token, the page asks for it and stays locked.
+       */
       async function load() {
         const chosen = model.value;
-        const models = await (await fetch("/models")).json();
+        const response = await fetch("/models", { headers: headers() });
+        if (!response.ok) {
+          error.textContent =
+            response.status === 401
+              ? "Type the token of the service: `voxo token` on its machine prints it."
+              : `${response.status} ${await response.text()}`;
+          toggle.disabled = model.disabled = true;
+          return;
+        }
+        const models = await response.json();
         downloaded = Object.fromEntries(models.map((entry) => [entry.id, entry.downloaded]));
         model.replaceChildren(...models.map(({ id }) => new Option(downloaded[id] ? id : `${id} (not downloaded)`, id)));
         model.value = chosen || (models.find((entry) => entry.downloaded) ?? models[0]).id;
@@ -81,11 +99,12 @@
         toggle.textContent = "Downloading";
         let running = true;
         const watch = setInterval(async () => {
-          const { downloading } = (await (await fetch("/models")).json()).find((entry) => entry.id === id);
+          const models = await (await fetch("/models", { headers: headers() })).json();
+          const { downloading } = models.find((entry) => entry.id === id);
           // Checked after the wait: the download may have ended while this answer was on its way.
           if (running && downloading !== null) toggle.textContent = `Downloading: ${downloading >> 20} MB`;
         }, 1000);
-        const response = await fetch(`/models/${id}/download`, { method: "POST" });
+        const response = await fetch(`/models/${id}/download`, { method: "POST", headers: headers() });
         running = false;
         clearInterval(watch);
         if (!response.ok) error.textContent = `${response.status} ${await response.text()}`;
@@ -93,6 +112,13 @@
       }
 
       model.onchange = idle;
+      // Kept in the browser, so the token is typed once.
+      token.value = localStorage.getItem("voxo-token") ?? "";
+      token.onchange = async () => {
+        localStorage.setItem("voxo-token", token.value.trim());
+        error.textContent = "";
+        await load();
+      };
       await load();
 
       toggle.onclick = async () => {
@@ -118,6 +144,7 @@
           stop = await dictate({
             url: "/dictations",
             params: { model: model.value },
+            headers: headers(),
             onAnswer(answer, seconds) {
               ended.textContent = [ended.textContent, ...answer.ended].filter(Boolean).join(" ");
               current.textContent = answer.current;

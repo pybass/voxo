@@ -34,6 +34,7 @@ def main() -> None:
     command(start, port, data_dir)
     command(stop, data_dir)
     command(download, data_dir).add_argument("model", help="the name of the model; a wrong one lists the names voxo knows")
+    command(token, data_dir).add_argument("--new", action="store_true", help="make a new token: the old one stops working")
     args = parser.parse_args()
     if args.command == "serve":
         serve(args.port, args.data_dir)
@@ -43,6 +44,8 @@ def main() -> None:
         stop(args.data_dir)
     elif args.command == "download":
         download(args.model, args.data_dir)
+    elif args.command == "token":
+        token(args.new, args.data_dir)
 
 
 def serve(port: int, data_dir: Path) -> None:
@@ -70,6 +73,15 @@ def download(model: str, data_dir: Path) -> None:
     except VoxoError as e:
         sys.exit(str(e))
     sys.stdout.write(f"{model} is downloaded\n")
+
+
+def token(new: bool, data_dir: Path) -> None:
+    """Print the token of the service; the first call makes it.
+
+    Every request to the service carries it as `Authorization: Bearer <token>`: give it to each app. Works while
+    the service runs.
+    """
+    sys.stdout.write(f"{Core(data_dir).token(new=new)}\n")
 
 
 if __name__ == "__main__":

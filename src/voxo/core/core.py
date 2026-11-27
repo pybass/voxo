@@ -1,6 +1,7 @@
 """`Core`, the API of the whole app, and the types its methods return."""
 
 import fcntl
+import hmac
 import os
 import threading
 import time
@@ -11,9 +12,9 @@ from typing import BinaryIO
 
 import numpy as np
 
-from voxo.core import decoder, pauses
+from voxo.core import access, decoder, pauses
 from voxo.core.catalog import MODELS, Model
-from voxo.core.errors import ConflictError, InvalidError, NotFoundError, VoxoError
+from voxo.core.errors import ConflictError, InvalidError, NotFoundError, UnauthorizedError, VoxoError
 from voxo.core.pauses import Phrases
 from voxo.core.recognizer import Recognizer
 
@@ -94,6 +95,24 @@ class Core:
             except BlockingIOError:
                 return int(f.read())
         return None
+
+    def token(self, *, new: bool = False) -> str:
+        """The token every request to the service must carry: one for all apps.
+
+        Makes one when there is none yet, or when *new*: the token before stops working at once, also in a
+        server that runs on the data dir.
+        """
+        if not new and (token := access.read(self._data_dir)):
+            return token
+        return access.make(self._data_dir)
+
+    def authorize(self, token: str) -> None:
+        """Raises `UnauthorizedError` unless *token* is the token of the service; none is, until `token` has made one."""
+        expected = access.read(self._data_dir)
+        if expected is None:
+            raise UnauthorizedError("voxo has no token yet: run `voxo token` on its machine to make one")
+        if not hmac.compare_digest(token.encode(), expected.encode()):
+            raise UnauthorizedError("the request needs the token of voxo: `voxo token` on its machine prints it")
 
     def models(self) -> list[ModelStatus]:
         """Every model voxo knows."""

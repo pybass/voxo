@@ -33,6 +33,8 @@ if (globalThis.AudioWorkletProcessor) {
  * @param {object} options
  * @param {string} options.url Where the server of the page takes dictations, such as `/dictations`.
  * @param {Record<string, string>} [options.params] More query parameters for every request, such as the model.
+ * @param {Record<string, string>} [options.headers] More headers for every request. A page of an app needs none:
+ *   its server adds the token of voxo.
  * @param {(answer: {ended: string[], current: string}, seconds: number) => void} options.onAnswer Called with the
  *   answer to each piece, and how long its request took. Add `ended` to the text; show `current` after the text
  *   until the next answer.
@@ -41,7 +43,7 @@ if (globalThis.AudioWorkletProcessor) {
  * @returns {Promise<() => Promise<void>>} A function that ends the dictation: it frees the microphone at once,
  *   and its promise resolves after the answer to the last piece, or after `onError`.
  */
-export async function dictate({ url, params = {}, onAnswer, onError }) {
+export async function dictate({ url, params = {}, headers = {}, onAnswer, onError }) {
   // At the rate voxo takes: the browser turns the sound of the microphone into it.
   const context = new AudioContext({ sampleRate: RATE });
   let stream;
@@ -83,7 +85,8 @@ export async function dictate({ url, params = {}, onAnswer, onError }) {
       blocks = [];
       heard = 0;
       const started = performance.now();
-      const answer = await post(`${url}/${id}?${new URLSearchParams({ ...params, piece, ...(last && { last }) })}`, sound);
+      const address = `${url}/${id}?${new URLSearchParams({ ...params, piece, ...(last && { last }) })}`;
+      const answer = await post(address, headers, sound);
       onAnswer(answer, (performance.now() - started) / 1000);
       if (last) return;
     }
@@ -104,11 +107,15 @@ export async function dictate({ url, params = {}, onAnswer, onError }) {
  * all: voxo adds the sound of a piece it has got before only once. Throws when the network keeps failing, and
  * when the server answers with an error.
  */
-async function post(address, sound) {
+async function post(address, headers, sound) {
   for (let attempt = 1; ; attempt += 1) {
     let response;
     try {
-      response = await fetch(address, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: sound });
+      response = await fetch(address, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/octet-stream" },
+        body: sound,
+      });
     } catch (error) {
       if (attempt === 3) throw error;
       await new Promise((resolve) => setTimeout(resolve, 500));
