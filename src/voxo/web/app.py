@@ -2,12 +2,19 @@ from importlib.metadata import version
 from pathlib import Path as FilePath
 from typing import Annotated
 
-from fastapi import Body, FastAPI, Path, Query, Request
+from fastapi import Body, FastAPI, Form, Path, Query, Request, UploadFile
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from voxo.core.core import Core, DictationText, ModelStatus
 from voxo.core.errors import ConflictError, InvalidError, NotFoundError, VoxoError
+
+
+class Transcription(BaseModel):
+    """The answer of the OpenAI API to a recording."""
+
+    text: str
 
 
 def create_app(core: Core) -> FastAPI:
@@ -76,5 +83,18 @@ def create_app(core: Core) -> FastAPI:
         `model` may differ from piece to piece. A model is loaded at its first use, so that request is slower.
         """
         return core.dictate(dictation_id, model, piece, sound, last=last)
+
+    @app.post("/v1/audio/transcriptions")
+    def transcribe(file: UploadFile, model: Annotated[str, Form()]) -> Transcription:
+        """Recognize a whole recording, in the request and the answer of the OpenAI API.
+
+        The body is a form: `file` is the recording, in any format ffmpeg reads, and `model` is the name of a
+        voxo model. `text` of the answer is all the speech of the recording; it is empty when nobody speaks.
+        The other fields of the OpenAI request are ignored, `response_format` too: the answer is always JSON.
+
+        Answers when the whole recording is recognized: an hour of speech takes minutes, so give the request
+        no short timeout. A model is loaded at its first use, so that request is slower.
+        """
+        return Transcription(text=core.transcribe(model, file.file))
 
     return app

@@ -7,10 +7,11 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 
-from voxo.core import pauses
+from voxo.core import decoder, pauses
 from voxo.core.catalog import MODELS, Model
 from voxo.core.errors import ConflictError, InvalidError, NotFoundError, VoxoError
 from voxo.core.pauses import Phrases
@@ -136,17 +137,9 @@ class Core:
         slower, and stays there. Raises `NotFoundError` for an unknown model or dictation, `ConflictError` for a model
         that is not downloaded or a piece out of turn, and `InvalidError` for sound that is not whole samples.
         """
-        model = Model.named(model_id)
         if len(sound) % 2:
             raise InvalidError("the sound must be 16-bit samples, but its length in bytes is odd")
-        with self._recognizers_lock:
-            if model_id not in self._recognizers:
-                if not model.is_downloaded(self._data_dir):
-                    raise ConflictError(f"{model_id} is not downloaded: run `voxo download {model_id}`")
-                # 4 threads were about 2.5 times faster than one, and the server voxo is meant for has 4 cores.
-                threads = min(4, os.process_cpu_count() or 1)
-                self._recognizers[model_id] = Recognizer(**model.files(self._data_dir), threads=threads)
-            recognizer = self._recognizers[model_id]
+        recognizer = self._recognizer(model_id)
         now = time.monotonic()
         with self._dictations_lock:
             for stale in [key for key, dictation in self._dictations.items() if now - dictation.used > 30]:
@@ -174,3 +167,38 @@ class Core:
             dictation.pieces += 1
             dictation.over = last
             return dictation.answer
+
+    def transcribe(self, model_id: str, recording: BinaryIO) -> str:
+        """The text of the speech in a whole recording, of any length.
+
+        *recording* is a file in any format ffmpeg reads; of a video, its sound is taken. The speech is split
+        into phrases as in a dictation, and the text is the phrases in a row; it is empty when nobody speaks.
+        An hour of speech takes minutes. A dictation on the same model goes on meanwhile, at a lower speed.
+
+        The model is loaded into memory at its first use, which makes that call slower, and stays there. Raises
+        `NotFoundError` for an unknown model, `ConflictError` for a model that is not downloaded, `InvalidError`
+        for a recording ffmpeg cannot read, and `VoxoError` when ffmpeg is not installed.
+        """
+        recognizer = self._recognizer(model_id)
+        phrases = Phrases(self._data_dir)
+        texts: list[str] = []
+        for sound in decoder.decode(recording):
+            texts += [recognizer.recognize(phrase) for phrase in phrases.add(sound, last=False)[0]]
+        texts += [recognizer.recognize(phrase) for phrase in phrases.add(np.empty(0, dtype=np.float32), last=True)[0]]
+        # The VAD takes some noise for speech, and the model then hears no words in it: such a phrase is left out.
+        return " ".join(text for text in texts if text)
+
+    def _recognizer(self, model_id: str) -> Recognizer:
+        """The model in memory, loaded at its first use.
+
+        Raises `NotFoundError` for an unknown model and `ConflictError` for one that is not downloaded.
+        """
+        model = Model.named(model_id)
+        with self._recognizers_lock:
+            if model_id not in self._recognizers:
+                if not model.is_downloaded(self._data_dir):
+                    raise ConflictError(f"{model_id} is not downloaded: run `voxo download {model_id}`")
+                # 4 threads were about 2.5 times faster than one, and the server voxo is meant for has 4 cores.
+                threads = min(4, os.process_cpu_count() or 1)
+                self._recognizers[model_id] = Recognizer(**model.files(self._data_dir), threads=threads)
+            return self._recognizers[model_id]

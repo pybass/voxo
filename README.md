@@ -2,8 +2,8 @@
 
 A speech-to-text service for your own server: an app sends it sound and gets the text back.
 
-**Early development.** Dictation works on the local port, with a page to try it; the rest of the goals is not
-built yet.
+**Early development.** Dictation and a whole recording work on the local port, with a page to try a dictation;
+the rest of the goals is not built yet.
 
 ## Goals
 
@@ -76,6 +76,22 @@ and numbers the pieces from 0. It sends the next piece only after the answer to 
 - `last=true` on a piece ends the dictation, and what was being said comes in `ended`.
 
 `http://127.0.0.1:7711/docs` has the rest: a piece sent again, a forgotten dictation, and the errors.
+
+### A whole recording
+
+```sh
+curl http://127.0.0.1:7711/v1/audio/transcriptions -F file=@meeting.m4a -F model=gigaam-v3
+# {"text":"Привет. Проверь, пожалуйста, последний коммит."}
+```
+
+An app sends a recording and gets all its text in one answer. The request and the answer are those of the
+OpenAI API: a program written for it works with voxo when it is given `http://127.0.0.1:7711/v1` as the address
+and a voxo model. Of the fields of that request, voxo reads only `file` and `model`, and the answer is always JSON.
+
+- The recording may be in any format `ffmpeg` reads. `ffmpeg` must be installed on the machine
+  (`apt install ffmpeg`); nothing else in voxo needs it.
+- The answer comes when the whole recording is recognized. An hour of speech takes minutes, so give the request
+  no short timeout.
 
 ### Test page
 
