@@ -1,8 +1,8 @@
 /**
  * The browser half of a voxo dictation: it takes the sound of the microphone and sends it, piece by piece, to the
- * server of the page, which passes each piece to voxo. It has no dependencies and draws nothing: an app takes a
- * copy of this file. The browser runs the file twice: the page imports it, and `dictate` loads it into the audio
- * thread, where only the block below does anything.
+ * server of the page, which passes each piece to voxo. It has no dependencies and draws nothing. An app gives its
+ * pages this file from voxo, at an address of its own. The browser runs the file twice: the page imports it, and
+ * `dictate` loads it into the audio thread, where only the block below does anything.
  */
 
 const RATE = 16000; // samples in a second of the sound voxo takes
@@ -25,13 +25,15 @@ if (globalThis.AudioWorkletProcessor) {
  * Start a dictation: ask for the microphone and send its sound in pieces of about half a second, each only after
  * the answer to the one before. When the server is slow, the pieces get longer and no sound is lost.
  *
- * A piece goes as `POST {url}/{id}?piece={number}` with the sound as the body, and the last one adds `last=true`:
- * the same request voxo takes. The server of the page checks who asks, and passes the request to voxo as it is.
+ * A piece goes as `POST {url}?id={id}&piece={number}` with the sound as the body, and the last one adds
+ * `last=true`: the same request voxo takes. The server of the page checks who asks, adds the token of voxo, and
+ * passes the request on as it is.
  *
  * Rejects when the dictation cannot start, as when the user refuses the microphone.
  *
  * @param {object} options
- * @param {string} options.url Where the server of the page takes dictations, such as `/dictations`.
+ * @param {string | URL} [options.url] Where the server of the page takes dictations. By default `dictations`
+ *   beside this file: `/dictations` for a file at `/voxo.js`.
  * @param {Record<string, string>} [options.params] More query parameters for every request, such as the model.
  * @param {Record<string, string>} [options.headers] More headers for every request. A page of an app needs none:
  *   its server adds the token of voxo.
@@ -43,7 +45,7 @@ if (globalThis.AudioWorkletProcessor) {
  * @returns {Promise<() => Promise<void>>} A function that ends the dictation: it frees the microphone at once,
  *   and its promise resolves after the answer to the last piece, or after `onError`.
  */
-export async function dictate({ url, params = {}, headers = {}, onAnswer, onError }) {
+export async function dictate({ url = new URL("dictations", import.meta.url), params = {}, headers = {}, onAnswer, onError }) {
   // At the rate voxo takes: the browser turns the sound of the microphone into it.
   const context = new AudioContext({ sampleRate: RATE });
   let stream;
@@ -85,7 +87,7 @@ export async function dictate({ url, params = {}, headers = {}, onAnswer, onErro
       blocks = [];
       heard = 0;
       const started = performance.now();
-      const address = `${url}/${id}?${new URLSearchParams({ ...params, piece, ...(last && { last }) })}`;
+      const address = `${url}?${new URLSearchParams({ ...params, id, piece, ...(last && { last }) })}`;
       const answer = await post(address, headers, sound);
       onAnswer(answer, (performance.now() - started) / 1000);
       if (last) return;

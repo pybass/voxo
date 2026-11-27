@@ -1,8 +1,8 @@
 from importlib.metadata import version
-from pathlib import Path as FilePath
+from pathlib import Path
 from typing import Annotated
 
-from fastapi import Body, Depends, FastAPI, Form, Path, Query, Request, Response, UploadFile
+from fastapi import Body, Depends, FastAPI, Form, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
@@ -51,12 +51,12 @@ def create_app(core: Core) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def test_page() -> FileResponse:
         """The test page: a dictation by voice with no app."""
-        return FileResponse(FilePath(__file__).with_name("test_page.html"))
+        return FileResponse(Path(__file__).with_name("test_page.html"))
 
     @app.get("/voxo.js", include_in_schema=False)
     def page_script() -> FileResponse:
-        """The page script: the browser half of a dictation, which an app takes a copy of."""
-        return FileResponse(FilePath(__file__).with_name("voxo.js"))
+        """The page script: the browser half of a dictation, which an app gives to its pages."""
+        return FileResponse(Path(__file__).with_name("voxo.js"))
 
     @app.get("/models")
     def models() -> list[ModelStatus]:
@@ -76,9 +76,10 @@ def create_app(core: Core) -> FastAPI:
         """
         core.download(model_id, lambda _fetched: None)
 
-    @app.post("/dictations/{dictation_id}")
+    # The dictation is named in the query, so the address has no part that changes: an app passes it on as it is.
+    @app.post("/dictations")
     def dictate(
-        dictation_id: Annotated[str, Path(max_length=64)],
+        dictation_id: Annotated[str, Query(alias="id", max_length=64)],
         model: str,
         piece: Annotated[int, Query(ge=0)],
         sound: Annotated[bytes, Body(media_type="application/octet-stream")] = b"",
@@ -87,8 +88,8 @@ def create_app(core: Core) -> FastAPI:
         """Add a piece of sound to a dictation and get the text it changed.
 
         The body is the sound, about half a second of it: mono, 16 kHz, 16-bit little-endian samples, no header.
-        Make up `dictation_id`, new for each dictation, and number the pieces from 0 in `piece`. Piece 0 starts
-        the dictation. Send the next piece only after the answer to the one before.
+        Make up `id`, new for each dictation, and number the pieces from 0 in `piece`. Piece 0 starts the
+        dictation. Send the next piece only after the answer to the one before.
 
         voxo splits the speech into phrases at its pauses. `ended` holds the phrases this piece ended: their text
         is final, so add it to the text of the dictation. `current` is the phrase still being said: show it after

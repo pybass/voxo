@@ -142,7 +142,6 @@
         const took = []; // seconds of each answer
         try {
           stop = await dictate({
-            url: "/dictations",
             params: { model: model.value },
             headers: headers(),
             onAnswer(answer, seconds) {
